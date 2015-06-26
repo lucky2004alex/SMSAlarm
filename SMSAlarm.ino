@@ -1,12 +1,26 @@
-#include "Timer.h"                     //http://github.com/JChristensen/Timer
+//===============================INCLUDE LIBRARIES==============================
+#include "Timer.h"  
+#include <SoftwareSerial.h>
+//================================DECLARE VARIABLES=============================
 Timer t, t1, t2; //Timers that will be used for launching functions at specific intervals
 int once;//when a breach is detected send only one SMS
-String trustedNo = "+40731491417";//This is the phone number that the system will send or receive SMS from
+String trustedNo = "+40747160083";//This is the phone number that the system will send or receive SMS from
 String password = "1234567890";//Password for ARM and DISARM
 int stare = 0;//State of the system
-int sensorValue;//Value of LDR
-//a-gsm variables============================
-#include <SoftwareSerial.h>
+//================================BUTON=========================================
+ int buttonState = 0;
+#define buttonPin 10 
+//====================================MAGNETIC contact==========================
+//contact magnetic
+const int contact = 9;     // the number of the pushbutton pin
+// variables will change:
+int contactState = 0;         // variable for reading the pushbutton status 
+//==================================IR LASER====================================
+// set pin numbers:
+const int laser = 13;     // the number of the pushbutton pin
+// variables will change:
+int laserState = 0;         // variable for reading the pushbutton status
+//==============================a-gsm variables=================================
 #define powerPIN     7//Arduino Digital pin used to power up / power down the modem
 #define resetPIN     6//Arduino Digital pin used to reset the modem 
 #define statusPIN    5//Arduino Digital pin used to monitor if modem is powered 
@@ -16,26 +30,30 @@ SoftwareSerial SSerial(2, 3);  //RX==>2 ,TX soft==>3
 char ch;
 char buffd[BUFFDSIZE];
 char o_buffd[BUFFDSIZE];
-
 int noSMS = 0, totSMS = 0;
-
 char readBuffer[200];
-///========================================
-
-int effect[] = {13, 12, 11, 10, 9, 8};//Pins on wich are connected LED's for visual effect
+///==============================LED-RED-GREEN==================================
+#define READY 11
+#define ARMED 12
 int count, n = 0;//Various variables
 void setup() {
-  //Timers initialization
+//================================DEFINE IN-OUT-PORTS===========================
+//=======================================RED-BUTTON=============================
+  pinMode(buttonPin, INPUT); 
+//=================================MAGNETIC CONTACT=============================
+   pinMode(contact, INPUT);
+   digitalWrite(contact, HIGH); // turn on input pin's pull-up resistor 
+//===============================LED-RED-GREEN==================================
+    pinMode(READY, OUTPUT);
+    pinMode(ARMED, OUTPUT);
+//=====================================IR-LASER=================================
+   pinMode(laser, INPUT);
+  digitalWrite(laser, LOW); // turn on input pin's pull-up resistor 
+//Timers initialization
   t.every(250, alarmSMS);
   t1.every(50, lightEffect);
-  t2.every(1, sensor);
-
-  //Led pin's initialization
-  for (int i = 0; i < 6; i++)
-  {
-    pinMode(effect[i], OUTPUT);
-  }
-  // a-gsm setup=====================================
+  t2.every(100, sensor);
+//============================= a-gsm setup=====================================
   SSerial.begin(9600);
   Serial.begin(57600);//1ms
   clearSSerial();
@@ -53,41 +71,73 @@ void setup() {
   clearBUFFD();
   ready4SMS = 0;
   ready4Voice = 0;
-  Serial.println("SMSAlarm ready");
-  //===================================================
+   Serial.println("SMSAlarm ready");//PUT ON SERIAL THE MESSAGE
+//==============================================================================
 }
 
 void loop() {
-  t.update();//Check for SMS
-  t1.update();//Light effect
-  t2.update();//Check sensor status
+  t.update();//Check for SMS (larmSMS function)
+  t1.update();//Light(LED) effect(lightEffect function)
+  t2.update();//Check sensor status(sensor function)
 }
 
 //This function is responsable to check for SMS and change the state of the system
 void alarmSMS() {
+//============VERIFY IF RED BUTTON IS PRESSED===================================
+	if(buttonState==HIGH)//RED BUTTON IS PRESSED
+  {
+      if (stare == 0) {/IF THE SYSTEM IS IN READY STATE AND ARIVED A NEW SMS-PUT SYSTEM IN ARMED STATE
+        stare = 1;//SET SYSTEM STATE TO ARMED
+       Serial.println("ARMED");//PUT ON SERIAL THE MESSAGE
+        sendSMS("+40755936728", "ARMED");//SEND SMS
+       
+  
+      }
+      else if (stare == 1) {//IF SYSTEM IS IN ARMED STATE AND ARIVED A NEW SMS-PUT SYSTEM IN READY STATE
+        stare = 0;//SET SYSTEM STATE TO READY
+        Serial.println("DISARMED");//PUT ON SERIAL THE MESSAGE
+        sendSMS("+40755936728", "DISARMED");//SEND SMS
+      }
+      else if (stare == 2) {//IF SYSTEM IS IN ALARM STATE AND ARIVED A NEW SMS-PUT SYSTEM IN ARMED STATE
+        stare = 1;//SET SYSTEM STATE TO ARMED
+        Serial.println("ALARM CANCEL BUT STILL ARMED");//PUT ON SERIAL THE MESSAGE
+        sendSMS("+40755936728", "ALARM CANCEL BUT STILL ARMED"); //SEND SMS       
+      }
+
+  }
+//==================VERIFY IF NEW SMS IS ARIVED=================================
 
   listSMS();
   int cnt;
   cnt = noSMS;
-  while (cnt > 0) {
+  while (cnt > 0) {//VERIFY IF IS A NEW SMS
     readSMS(cnt);
 
-    if ((trustedNo == getValue(buffd, ',', 1).substring(1, 13)) && (password == getValue(buffd, ',', 4))) {
-      if (stare == 0) {
-        stare = 1;
-        Serial.println("ARMED");
-        sendSMS("+40731491417", "ARMED");
+    if ((trustedNo == getValue(buffd, ',', 1).substring(1, 13)) && (password == getValue(buffd, ',', 4))) {//VERIFY IF IS THE TRUSTED NUMBER AND PASSWORD
+      if((contactState==HIGH)||(laserState == LOW))//VERIFY IF ANY CONTACT IS IN MODE (NOT NORMAL)
+      {
+         sendSMS("+40747160083", "One of sensor is Opened.Can not Arm!");//SEND SMS
       }
-      else if (stare == 1) {
-        stare = 0;
-        Serial.println("DISARMED");
-        sendSMS("+40731491417", "DISARMED");
+      else
+      {
+      if (stare == 0) {//IF THE SYSTEM IS IN READY STATE AND ARIVED A NEW SMS-PUT SYSTEM IN ARMED STATE
+        stare = 1;//SET SYSTEM STATE TO ARMED
+        Serial.println("ARMED");//PUT ON SERIAL THE MESSAGE
+        sendSMS("+40747160083", "ARMED");//SEND SMS
       }
-      else if (stare == 2) {
-        stare = 1;
-        Serial.println("ALARM CANCEL BUT STILL ARMED");
-        sendSMS("+40731491417", "ALARM CANCEL BUT STILL ARMED");        
+      else if (stare == 1) {//IF SYSTEM IS IN ARMED STATE AND ARIVED A NEW SMS-PUT SYSTEM IN READY STATE
+        stare = 0;//SET SYSTEM STATE TO READY
+        Serial.println("DISARMED");//PUT ON SERIAL THE MESSAGE
+        sendSMS("+40747160083", "DISARMED");//SEND SMS
       }
+      else if (stare == 2) {//IF SYSTEM IS IN ALARM STATE AND ARIVED A NEW SMS-PUT SYSTEM IN ARMED STATE
+        stare = 1;//SET SYSTEM STATE TO ARMED
+        Serial.println("ALARM CANCEL BUT STILL ARMED");//PUT ON SERIAL THE MESSAGE
+        sendSMS("+40747160083", "ALARM CANCEL BUT STILL ARMED");  //SEND SMS      
+      }
+
+    }
+    
 
     }
     deleteSMS(cnt);
@@ -98,46 +148,52 @@ void alarmSMS() {
 }
 //Function responsable for the LED effects
 void lightEffect() {
-  if (stare == 0) {
-    for (int i = 0; i < 6; i++) {
-      digitalWrite(effect[i], HIGH);
-      delay(50);
-      digitalWrite(effect[i], LOW);
-    }
-    for (int i = 6; i >= 0; i--) {
-      digitalWrite(effect[i], HIGH);
-      delay(50);
-      digitalWrite(effect[i], LOW);
-    }
+  if (stare == 0) {//IF SYSTEM IS IN READY STATE-PUT ON GREEN LED
+   
+      digitalWrite(READY, HIGH);//GREEN LIGTH WILL BE ON
+      digitalWrite(ARMED, LOW);//RED LIGTH WILL BE OFF
+   
   }
-  else if (stare == 1)
+  else if (stare == 1)//IF SYSTEM IS IN ARM STATE-PUT ON RED LED
   { once = 0;
-    for (int i = 0; i < 6; i++) {
-      digitalWrite(effect[i], HIGH);
-    }
-
+    
+      digitalWrite(READY, LOW);//RED LIGTH WILL BE OFF
+      digitalWrite(ARMED, HIGH);//RED LIGTH WILL BE ON
+      
   }
 
-  else if (stare == 2)
+  else if (stare == 2)//IF SYSTEM STATE IS ALARM-PUT ON BOTH OF LEDS
   {
-    for (int i = 0; i < 6; i++) digitalWrite(effect[i], HIGH);
-    delay(50);
-    for (int i = 0; i < 6; i++) digitalWrite(effect[i], LOW);
-
+      digitalWrite(READY, HIGH);//RED LIGTH WILL BE ON
+      digitalWrite(ARMED, HIGH);//RED LIGTH WILL BE ON
+      
+           
   }
-
-
-
 }
 //Function that is continuously checking the sensor value and in case of trigger it will send an alert
 void sensor()
 {
-  sensorValue = analogRead(A0);
-  if ((stare == 1) && (sensorValue <= 950))
-  { stare = 2;
-    if ((sendSMS("+40731491417", "INTRUDER DETECTED") == 1) & (once == 0)) {
-      t1.update();//Light effect
-      once = 1;
+//===================================IR-LASER===================================
+  laserState = digitalRead(laser);
+  if ((stare==1)&&(laserState == LOW)){//IF THE SYSTEM IS ARMED AND THE NOMAL STATE OF LASER CHANGED , PUT SYSTEM IN ALARM STATE
+    stare = 2;//PUT SYSTEM IN ALARM STATE
+    if (once == 0){//PUT SYSTEM IN ALARM STATE
+      Serial.println("DOOR LASER DETECT PERSON!");//PUT ON SERIAL THE MESSAGE
+      sendSMS("+40747160083", "DOOR LASER DETECT PERSON!");//SEND SMS
+      t1.update();//Light effect//CHANGE LEDS FOR ALARM STATE(RED AND GREEN ON)
+      once = 1;//ONE MESSAGE WAS SEND
     }
-  }
+}
+//================================MAGNETIC CONTACT===============================
+  contactState = digitalRead(contact);
+  if((stare==1)&&(contactState==HIGH))//IF THE SYSTEM IS ARMED AND THE NOMAL STATE OF CONTACT CHANGED , PUT SYSTEM IN ALARM STATE
+         { stare = 2;//PUT SYSTEM IN ALARM STATE
+          if (once == 0) {//PUT SYSTEM IN ALARM STATE
+           Serial.println("WINDOW IS OPENED!");//PUT ON SERIAL THE MESSAGE
+            sendSMS("+40747160083", "WINDOW IS OPENED!");//SEND SMS
+      t1.update();//Light effect/Light effect//CHANGE LEDS FOR ALARM STATE(RED AND GREEN ON)
+      once = 1;//ONE MESSAGE WAS SEND
+    }
+  
+}
 }
